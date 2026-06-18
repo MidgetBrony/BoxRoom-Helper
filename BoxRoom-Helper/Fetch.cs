@@ -202,7 +202,6 @@ public class Fetcher
         string developer,
         string publisher,
         string genre,
-        string headerUrl,
         string baseDir
         )
     {
@@ -256,7 +255,7 @@ public class Fetcher
             DetailedDescription = detailedDescription,
             AboutTheGame = aboutTheGame,
             BoxArtUrlBase = "",
-            FallbackHeaderUrl = headerUrl,
+            FallbackHeaderUrl = "",
             ReleaseDate = releaseDate,
             Developers = new() { developer },
             Publishers = new() { publisher },

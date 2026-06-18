@@ -1,6 +1,6 @@
 namespace BoxRoom_Helper
 {
-    public partial class Form1 : Form
+    public partial class MainForm : Form
     {
         string cachePath = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -14,7 +14,7 @@ namespace BoxRoom_Helper
         string SteamCachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam", "AppCache", "LibraryCache");
 
         public Fetcher fetcher = new Fetcher();
-        public Form1()
+        public MainForm()
         {
             InitializeComponent();
 
@@ -26,6 +26,8 @@ namespace BoxRoom_Helper
             fetcher.ProgressChanged += Fetcher_ProgressChanged;
 
             this.Text = $"BoxRoom Helper v{Application.ProductVersion}";
+
+            tabControl1.TabPages.Remove(AutoScrapeTab);
         }
 
         private void Fetcher_ProgressChanged(
@@ -72,7 +74,6 @@ namespace BoxRoom_Helper
                 txtDeveloper.Text,
                 txtPublisher.Text,
                 txtGenre.Text,
-                txtHeaderUrl.Text,
                 BoxRoomCachePath.Text);
         }
 

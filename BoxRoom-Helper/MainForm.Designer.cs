@@ -1,6 +1,6 @@
 ﻿namespace BoxRoom_Helper
 {
-    partial class Form1
+    partial class MainForm
     {
         private Label lblCustomName;
         private TextBox txtCustomName;
@@ -16,9 +16,6 @@
 
         private Label lblReleaseDate;
         private DateTimePicker dtpReleaseDate;
-
-        private Label lblHeaderUrl;
-        private TextBox txtHeaderUrl;
 
         private Label lblShortDescription;
         private TextBox txtShortDescription;
@@ -56,6 +53,8 @@
         {
             tabControl1 = new TabControl();
             AutoScrapeTab = new TabPage();
+            StatusProgress = new ProgressBar();
+            StatusLabel = new Label();
             button5 = new Button();
             CoverGetter = new Button();
             button4 = new Button();
@@ -77,8 +76,6 @@
             txtGenre = new TextBox();
             lblReleaseDate = new Label();
             dtpReleaseDate = new DateTimePicker();
-            lblHeaderUrl = new Label();
-            txtHeaderUrl = new TextBox();
             lblShortDescription = new Label();
             txtShortDescription = new TextBox();
             lblAboutGame = new Label();
@@ -87,8 +84,6 @@
             BoxRoomCachePath = new TextBox();
             button1 = new Button();
             BoxRoomPathBox = new Label();
-            StatusLabel = new Label();
-            StatusProgress = new ProgressBar();
             tabControl1.SuspendLayout();
             AutoScrapeTab.SuspendLayout();
             BasicAddTab.SuspendLayout();
@@ -123,6 +118,22 @@
             AutoScrapeTab.TabIndex = 2;
             AutoScrapeTab.Text = "AutoScrape";
             AutoScrapeTab.UseVisualStyleBackColor = true;
+            // 
+            // StatusProgress
+            // 
+            StatusProgress.Location = new Point(12, 417);
+            StatusProgress.Name = "StatusProgress";
+            StatusProgress.Size = new Size(428, 23);
+            StatusProgress.TabIndex = 9;
+            // 
+            // StatusLabel
+            // 
+            StatusLabel.AutoSize = true;
+            StatusLabel.Location = new Point(143, 443);
+            StatusLabel.Name = "StatusLabel";
+            StatusLabel.Size = new Size(150, 15);
+            StatusLabel.TabIndex = 8;
+            StatusLabel.Text = "StatusLabelTEXTGOESHERE";
             // 
             // button5
             // 
@@ -231,8 +242,6 @@
             CustomGameTab.Controls.Add(txtGenre);
             CustomGameTab.Controls.Add(lblReleaseDate);
             CustomGameTab.Controls.Add(dtpReleaseDate);
-            CustomGameTab.Controls.Add(lblHeaderUrl);
-            CustomGameTab.Controls.Add(txtHeaderUrl);
             CustomGameTab.Controls.Add(lblShortDescription);
             CustomGameTab.Controls.Add(txtShortDescription);
             CustomGameTab.Controls.Add(lblAboutGame);
@@ -319,21 +328,6 @@
             dtpReleaseDate.Size = new Size(210, 23);
             dtpReleaseDate.TabIndex = 9;
             // 
-            // lblHeaderUrl
-            // 
-            lblHeaderUrl.Location = new Point(6, 154);
-            lblHeaderUrl.Name = "lblHeaderUrl";
-            lblHeaderUrl.Size = new Size(100, 15);
-            lblHeaderUrl.TabIndex = 10;
-            lblHeaderUrl.Text = "Header Image URL";
-            // 
-            // txtHeaderUrl
-            // 
-            txtHeaderUrl.Location = new Point(6, 172);
-            txtHeaderUrl.Name = "txtHeaderUrl";
-            txtHeaderUrl.Size = new Size(434, 23);
-            txtHeaderUrl.TabIndex = 11;
-            // 
             // lblShortDescription
             // 
             lblShortDescription.Location = new Point(6, 202);
@@ -399,22 +393,6 @@
             BoxRoomPathBox.Size = new Size(88, 15);
             BoxRoomPathBox.TabIndex = 3;
             BoxRoomPathBox.Text = "BoxRoom Path:";
-            // 
-            // StatusLabel
-            // 
-            StatusLabel.AutoSize = true;
-            StatusLabel.Location = new Point(143, 443);
-            StatusLabel.Name = "StatusLabel";
-            StatusLabel.Size = new Size(150, 15);
-            StatusLabel.TabIndex = 8;
-            StatusLabel.Text = "StatusLabelTEXTGOESHERE";
-            // 
-            // StatusProgress
-            // 
-            StatusProgress.Location = new Point(12, 417);
-            StatusProgress.Name = "StatusProgress";
-            StatusProgress.Size = new Size(428, 23);
-            StatusProgress.TabIndex = 9;
             // 
             // Form1
             // 
