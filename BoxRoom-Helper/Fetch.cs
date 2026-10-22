@@ -2,492 +2,694 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
-public class SteamMeta
-{
-    public int PlayTimeMinutes { get; set; }
-    public string Name { get; set; } = "";
-    public string ShortDescription { get; set; } = "";
-    public string Type { get; set; } = "";
-    public string DetailedDescription { get; set; } = "";
-    public string AboutTheGame { get; set; } = "";
-    public string BoxArtUrlBase { get; set; } = "";
-    public string FallbackHeaderUrl { get; set; } = "";
-    public string ReleaseDate { get; set; } = "";
-    public List<string> Developers { get; set; } = new();
-    public List<string> Publishers { get; set; } = new();
-    public List<string> Genres { get; set; } = new();
-    public List<string> ScreenshotUrls { get; set; } = new();
-}
-public class MetaHelper
-{
-    public string Type { get; set; } = "";
-}
 
-public class Fetcher
+namespace BoxRoom_Helper
 {
-    public event Action<int, int, string>? ProgressChanged;
-
-    private readonly HttpClient _client = new();
-
-    private async Task WriteMetaAsync(string folder, SteamMeta meta)
+    public class Fetcher
     {
-        Directory.CreateDirectory(folder);
+        public event Action<int, int, string>? ProgressChanged;
 
-        await File.WriteAllTextAsync(
-            Path.Combine(folder, "meta.json"),
-            JsonSerializer.Serialize(
-                meta,
-                new JsonSerializerOptions
-                {
-                    WriteIndented = true
-                }));
-    }
+        private readonly HttpClient _client = new();
 
-    public async Task<SteamMeta?> GetSteamData(int steamId)
-    {
-        string steamUrl =
-            $"https://store.steampowered.com/api/appdetails?appids={steamId}";
-
-        while (true)
+        private async Task WriteMetaAsync(string folder, SteamMeta meta)
         {
-            HttpResponseMessage response = await _client.GetAsync(steamUrl);
+            Directory.CreateDirectory(folder);
 
-            // Steam is telling us to slow down.
-            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            await File.WriteAllTextAsync(
+                Path.Combine(folder, "meta.json"),
+                JsonSerializer.Serialize(
+                    meta,
+                    new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    }));
+        }
+
+        public async Task<SteamMeta?> GetSteamData(int steamId)
+        {
+            string steamUrl =
+                $"https://store.steampowered.com/api/appdetails?appids={steamId}";
+
+            while (true)
             {
-                TimeSpan waitTime =
-                    response.Headers.RetryAfter?.Delta
-                    ?? TimeSpan.FromMinutes(1);
+                HttpResponseMessage response = await _client.GetAsync(steamUrl);
 
-                ProgressChanged?.Invoke(
-                    0,
-                    0,
-                    $"Steam rate limit reached. Waiting {waitTime.TotalSeconds:0} seconds...");
+                // Steam is telling us to slow down.
+                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                {
+                    TimeSpan waitTime =
+                        response.Headers.RetryAfter?.Delta
+                        ?? TimeSpan.FromMinutes(1);
 
-                await Task.Delay(waitTime);
-                continue;
+                    ProgressChanged?.Invoke(
+                        0,
+                        0,
+                        $"Steam rate limit reached. Waiting {waitTime.TotalSeconds:0} seconds...");
+
+                    await Task.Delay(waitTime);
+                    continue;
+                }
+
+                // Throw for anything else (404, 500, etc.)
+                response.EnsureSuccessStatusCode();
+
+                string json = await response.Content.ReadAsStringAsync();
+
+                JsonNode? root = JsonNode.Parse(json);
+
+                if (root?[steamId.ToString()]?["success"]?.GetValue<bool>() != true)
+                    return null;
+
+                JsonNode gameData = root[steamId.ToString()]!["data"]!;
+
+                return new SteamMeta
+                {
+                    PlayTimeMinutes = 0,
+                    Name = gameData["name"]?.ToString() ?? "",
+                    Type = gameData["type"]?.ToString() ?? "",
+                    ShortDescription = gameData["short_description"]?.ToString() ?? "",
+                    DetailedDescription = gameData["detailed_description"]?.ToString() ?? "",
+                    AboutTheGame = gameData["about_the_game"]?.ToString() ?? "",
+                    BoxArtUrlBase = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{steamId}/",
+                    FallbackHeaderUrl = gameData["header_image"]?.ToString() ?? "",
+                    ReleaseDate = gameData["release_date"]?["date"]?.ToString() ?? "",
+
+                    Developers = gameData["developers"]?
+                        .AsArray()
+                        .Select(x => x?.ToString() ?? "")
+                        .ToList() ?? new(),
+
+                    Publishers = gameData["publishers"]?
+                        .AsArray()
+                        .Select(x => x?.ToString() ?? "")
+                        .ToList() ?? new(),
+
+                    Genres = gameData["genres"]?
+                        .AsArray()
+                        .Select(x => x?["description"]?.ToString() ?? "")
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .ToList() ?? new(),
+
+                    ScreenshotUrls = gameData["screenshots"]?
+                        .AsArray()
+                        .Select(x => x?["path_full"]?.ToString() ?? "")
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .ToList() ?? new()
+                };
+            }
+        }
+        public async Task UpdateOwnedGamesAsync(
+        string baseDir,
+        IEnumerable<int> appIdsToAdd)
+        {
+            string ownedGamesPath =
+                Path.Combine(baseDir, "owned_games.json");
+
+            JsonObject ownedData;
+
+            if (File.Exists(ownedGamesPath))
+            {
+                string existingJson =
+                    await File.ReadAllTextAsync(ownedGamesPath);
+
+                ownedData =
+                    JsonNode.Parse(existingJson)?.AsObject()
+                    ?? new JsonObject();
+            }
+            else
+            {
+                ownedData = new JsonObject();
             }
 
-            // Throw for anything else (404, 500, etc.)
-            response.EnsureSuccessStatusCode();
+            JsonArray appIds;
 
-            string json = await response.Content.ReadAsStringAsync();
+            if (ownedData["AppIds"] is JsonArray existingArray)
+            {
+                appIds = existingArray;
+            }
+            else
+            {
+                appIds = new JsonArray();
+                ownedData["AppIds"] = appIds;
+            }
 
-            JsonNode? root = JsonNode.Parse(json);
+            HashSet<int> existingIds =
+                appIds
+                    .Select(x => x?.GetValue<int>() ?? 0)
+                    .ToHashSet();
 
-            if (root?[steamId.ToString()]?["success"]?.GetValue<bool>() != true)
-                return null;
+            foreach (int id in appIdsToAdd)
+            {
+                if (!existingIds.Contains(id))
+                {
+                    appIds.Add(id);
+                    existingIds.Add(id);
+                }
+            }
 
-            JsonNode gameData = root[steamId.ToString()]!["data"]!;
+            await File.WriteAllTextAsync(
+                ownedGamesPath,
+                ownedData.ToJsonString(
+                    new JsonSerializerOptions
+                    {
+                        WriteIndented = false
+                    }));
+        }
+        private async Task WriteMetaHelperAsync(
+        string folder,
+        SteamMeta meta)
+        {
+            Directory.CreateDirectory(folder);
 
-            return new SteamMeta
+            MetaHelper helper = new()
+            {
+                Type = meta.Type
+            };
+
+            await File.WriteAllTextAsync(
+                Path.Combine(folder, "meta.helper.json"),
+                JsonSerializer.Serialize(
+                    helper,
+                    new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    }));
+        }
+        public async Task CreateCustomGameAsync(
+            string name,
+            string shortDescription,
+            string detailedDescription,
+            string aboutTheGame,
+            string releaseDate,
+            string developer,
+            string publisher,
+            string genre,
+            string baseDir
+            )
+        {
+            Directory.CreateDirectory(baseDir);
+
+            string ownedGamesPath =
+                Path.Combine(baseDir, "owned_games.json");
+
+            int customAppId = 900000000;
+
+            JsonObject ownedData;
+
+            if (File.Exists(ownedGamesPath))
+            {
+                ownedData = JsonNode.Parse(
+                    await File.ReadAllTextAsync(ownedGamesPath))
+                    ?.AsObject() ?? new JsonObject();
+            }
+            else
+            {
+                ownedData = new JsonObject();
+            }
+
+            JsonArray appIds;
+
+            if (ownedData["AppIds"] is JsonArray existing)
+            {
+                appIds = existing;
+            }
+            else
+            {
+                appIds = new JsonArray();
+                ownedData["AppIds"] = appIds;
+            }
+
+            HashSet<int> existingIds =
+                appIds.Select(x => x?.GetValue<int>() ?? 0)
+                      .ToHashSet();
+
+            while (existingIds.Contains(customAppId))
+            {
+                customAppId++;
+            }
+
+            SteamMeta meta = new()
             {
                 PlayTimeMinutes = 0,
-                Name = gameData["name"]?.ToString() ?? "",
-                Type = gameData["type"]?.ToString() ?? "",
-                ShortDescription = gameData["short_description"]?.ToString() ?? "",
-                DetailedDescription = gameData["detailed_description"]?.ToString() ?? "",
-                AboutTheGame = gameData["about_the_game"]?.ToString() ?? "",
-                BoxArtUrlBase = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{steamId}/",
-                FallbackHeaderUrl = gameData["header_image"]?.ToString() ?? "",
-                ReleaseDate = gameData["release_date"]?["date"]?.ToString() ?? "",
-
-                Developers = gameData["developers"]?
-                    .AsArray()
-                    .Select(x => x?.ToString() ?? "")
-                    .ToList() ?? new(),
-
-                Publishers = gameData["publishers"]?
-                    .AsArray()
-                    .Select(x => x?.ToString() ?? "")
-                    .ToList() ?? new(),
-
-                Genres = gameData["genres"]?
-                    .AsArray()
-                    .Select(x => x?["description"]?.ToString() ?? "")
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .ToList() ?? new(),
-
-                ScreenshotUrls = gameData["screenshots"]?
-                    .AsArray()
-                    .Select(x => x?["path_full"]?.ToString() ?? "")
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .ToList() ?? new()
+                Name = name,
+                Type = "Custom",
+                ShortDescription = shortDescription,
+                DetailedDescription = detailedDescription,
+                AboutTheGame = aboutTheGame,
+                BoxArtUrlBase = "",
+                FallbackHeaderUrl = "",
+                ReleaseDate = releaseDate,
+                Developers = new() { developer },
+                Publishers = new() { publisher },
+                Genres = new() { genre },
+                ScreenshotUrls = new()
             };
-        }
-    }
-    public async Task UpdateOwnedGamesAsync(
-    string baseDir,
-    IEnumerable<int> appIdsToAdd)
-    {
-        string ownedGamesPath =
-            Path.Combine(baseDir, "owned_games.json");
 
-        JsonObject ownedData;
 
-        if (File.Exists(ownedGamesPath))
-        {
-            string existingJson =
-                await File.ReadAllTextAsync(ownedGamesPath);
+            string gameFolder =
+                Path.Combine(baseDir, customAppId.ToString());
 
-            ownedData =
-                JsonNode.Parse(existingJson)?.AsObject()
-                ?? new JsonObject();
-        }
-        else
-        {
-            ownedData = new JsonObject();
+            Directory.CreateDirectory(gameFolder);
+
+            await WriteMetaAsync(gameFolder, meta);
+            await WriteMetaHelperAsync(gameFolder, meta);
+
+            appIds.Add(customAppId);
+
+            await File.WriteAllTextAsync(
+                ownedGamesPath,
+                ownedData.ToJsonString());
+
+            MessageBox.Show(
+                $"Custom title created.\nAppID: {customAppId}",
+                "Success",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
-        JsonArray appIds;
-
-        if (ownedData["AppIds"] is JsonArray existingArray)
+        internal async Task BasicFetch(string sourceFolder, string targetFolder)
         {
-            appIds = existingArray;
-        }
-        else
-        {
-            appIds = new JsonArray();
-            ownedData["AppIds"] = appIds;
-        }
-
-        HashSet<int> existingIds =
-            appIds
-                .Select(x => x?.GetValue<int>() ?? 0)
-                .ToHashSet();
-
-        foreach (int id in appIdsToAdd)
-        {
-            if (!existingIds.Contains(id))
+            if (!Directory.Exists(sourceFolder))
             {
-                appIds.Add(id);
-                existingIds.Add(id);
+                MessageBox.Show("Source folder does not exist.");
+                return;
             }
+
+            Directory.CreateDirectory(targetFolder);
+
+            List<int> appIds = new();
+
+            foreach (string dir in Directory.GetDirectories(sourceFolder))
+            {
+                string folderName = Path.GetFileName(dir);
+
+                Directory.CreateDirectory(Path.Combine(targetFolder, folderName));
+
+                if (int.TryParse(folderName, out int appId))
+                {
+                    appIds.Add(appId);
+                }
+            }
+
+            if (appIds.Count == 0)
+            {
+                MessageBox.Show("No Steam AppID folders found.");
+                return;
+            }
+
+            await ScrapeGamesAsync(string.Join(Environment.NewLine, appIds), targetFolder);
+        }
+        public async Task ScrapeGamesAsync(string inputText, string targetFolder)
+        {
+            string[] lines = inputText.Split(
+                new[] { Environment.NewLine },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            int total = lines.Length;
+            int current = 0;
+
+            int downloaded = 0;
+            int skipped = 0;
+            int failed = 0;
+
+            List<int> successfulIds = new();
+
+            foreach (string line in lines)
+            {
+                current++;
+
+                if (!int.TryParse(line.Trim(), out int appId))
+                {
+                    failed++;
+
+                    ProgressChanged?.Invoke(
+                        current,
+                        total,
+                        $"Invalid AppID: {line}");
+
+                    continue;
+                }
+
+                string targetDir = Path.Combine(
+                    targetFolder,
+                    appId.ToString());
+
+                string metaPath = Path.Combine(
+                    targetDir,
+                    "meta.json");
+
+                // Already scraped
+                if (File.Exists(metaPath))
+                {
+                    skipped++;
+
+                    ProgressChanged?.Invoke(
+                        current,
+                        total,
+                        $"Skipping {appId} (already exists)");
+
+                    continue;
+                }
+
+                ProgressChanged?.Invoke(
+                    current,
+                    total,
+                    $"Fetching {appId}...");
+
+                SteamMeta? meta = await GetSteamData(appId);
+
+                if (meta == null)
+                {
+                    failed++;
+
+                    ProgressChanged?.Invoke(
+                        current,
+                        total,
+                        $"Failed {appId}");
+
+                    continue;
+                }
+                await WriteMetaAsync(targetDir, meta);
+                await WriteMetaHelperAsync(targetDir, meta);
+
+                downloaded++;
+                successfulIds.Add(appId);
+
+                ProgressChanged?.Invoke(
+                    current,
+                    total,
+                    $"Saved {meta.Name}");
+
+                // Be nice to Steam
+                await Task.Delay(Random.Shared.Next(200, 500));
+            }
+
+            if (successfulIds.Count > 0)
+            {
+                ProgressChanged?.Invoke(
+                    total,
+                    total,
+                    "Updating owned_games.json...");
+
+                await UpdateOwnedGamesAsync(
+                    targetFolder,
+                    successfulIds);
+            }
+
+            ProgressChanged?.Invoke(
+                total,
+                total,
+                $"Done! Downloaded: {downloaded}  Skipped: {skipped}  Failed: {failed}");
         }
 
-        await File.WriteAllTextAsync(
-            ownedGamesPath,
-            ownedData.ToJsonString(
-                new JsonSerializerOptions
+        public async Task RebuildOwnedGamesAsync(
+        string boxRoomCachePath,
+        bool includeGames,
+        bool includeDlc,
+        bool includeSoftware,
+        bool includeAudio,
+        bool includeCustom)
+        {
+            List<int> ids = new();
+
+            foreach (string dir in Directory.EnumerateDirectories(boxRoomCachePath))
+            {
+                string helperPath = Path.Combine(dir, "meta.helper.json");
+
+                if (!File.Exists(helperPath))
+                    continue;
+
+                MetaHelper? helper =
+                    JsonSerializer.Deserialize<MetaHelper>(
+                        await File.ReadAllTextAsync(helperPath));
+
+                if (helper == null)
+                    continue;
+
+                bool include = helper.Type switch
+                {
+                    "game" => includeGames,
+                    "dlc" => includeDlc,
+                    "software" => includeSoftware,
+                    "music" => includeAudio,
+                    "Custom" => includeCustom,
+                    _ => false
+                };
+
+                if (!include)
+                    continue;
+
+                if (int.TryParse(Path.GetFileName(dir), out int appId))
+                {
+                    ids.Add(appId);
+                }
+            }
+            ids.Sort();
+
+            JsonObject owned = new();
+            owned["AppIds"] = new JsonArray(ids.Select(x => (JsonNode)x).ToArray());
+
+            await File.WriteAllTextAsync(
+                Path.Combine(boxRoomCachePath, "owned_games.json"),
+                owned.ToJsonString(new JsonSerializerOptions
                 {
                     WriteIndented = false
                 }));
-    }
-    private async Task WriteMetaHelperAsync(
-    string folder,
-    SteamMeta meta)
-    {
-        Directory.CreateDirectory(folder);
-
-        MetaHelper helper = new()
+        }
+        public async Task UpdateBoxArtAsync(
+            string steamCachePath,
+            string boxRoomCachePath)
         {
-            Type = meta.Type
-        };
+            if (!Directory.Exists(boxRoomCachePath))
+            {
+                MessageBox.Show("BOXROOM cache folder not found.");
+                return;
+            }
 
-        await File.WriteAllTextAsync(
-            Path.Combine(folder, "meta.helper.json"),
-            JsonSerializer.Serialize(
-                helper,
-                new JsonSerializerOptions
+            bool useLocalCache = Directory.Exists(steamCachePath);
+
+            string[] gameFolders = Directory.GetDirectories(boxRoomCachePath);
+
+            int total = gameFolders.Length;
+            int current = 0;
+
+            int copied = 0;
+            int downloaded = 0;
+            int skipped = 0;
+            int missing = 0;
+
+            foreach (string gameFolder in gameFolders)
+            {
+                current++;
+
+                string appId = Path.GetFileName(gameFolder);
+
+                ProgressChanged?.Invoke(
+                    current,
+                    total,
+                    $"Checking {appId}...");
+
+                string boxArt = Path.Combine(gameFolder, "boxart.jpg");
+
+                // Already has artwork
+                if (File.Exists(boxArt))
                 {
-                    WriteIndented = true
-                }));
-    }
-    public async Task CreateCustomGameAsync(
-        string name,
-        string shortDescription,
-        string detailedDescription,
-        string aboutTheGame,
-        string releaseDate,
-        string developer,
-        string publisher,
-        string genre,
-        string baseDir
-        )
-    {
-        Directory.CreateDirectory(baseDir);
+                    skipped++;
 
-        string ownedGamesPath =
-            Path.Combine(baseDir, "owned_games.json");
+                    ProgressChanged?.Invoke(
+                        current,
+                        total,
+                        $"Skipping {appId} (already exists)");
 
-        int customAppId = 900000000;
+                    continue;
+                }
 
-        JsonObject ownedData;
+                bool found = false;
 
-        if (File.Exists(ownedGamesPath))
-        {
-            ownedData = JsonNode.Parse(
-                await File.ReadAllTextAsync(ownedGamesPath))
-                ?.AsObject() ?? new JsonObject();
-        }
-        else
-        {
-            ownedData = new JsonObject();
-        }
+                // -------------------------------------
+                // Try local Steam cache first
+                // -------------------------------------
+                if (useLocalCache)
+                {
+                    string steamFolder = Path.Combine(steamCachePath, appId);
 
-        JsonArray appIds;
+                    if (Directory.Exists(steamFolder))
+                    {
+                        string? cover = Directory
+                            .EnumerateFiles(
+                                steamFolder,
+                                "library_600x900.jpg",
+                                SearchOption.AllDirectories)
+                            .FirstOrDefault();
 
-        if (ownedData["AppIds"] is JsonArray existing)
-        {
-            appIds = existing;
-        }
-        else
-        {
-            appIds = new JsonArray();
-            ownedData["AppIds"] = appIds;
-        }
+                        if (cover != null)
+                        {
+                            File.Copy(cover, boxArt);
 
-        HashSet<int> existingIds =
-            appIds.Select(x => x?.GetValue<int>() ?? 0)
-                  .ToHashSet();
+                            copied++;
+                            found = true;
 
-        while (existingIds.Contains(customAppId))
-        {
-            customAppId++;
-        }
+                            ProgressChanged?.Invoke(
+                                current,
+                                total,
+                                $"Copied local cover for {appId}");
 
-        SteamMeta meta = new()
-        {
-            PlayTimeMinutes = 0,
-            Name = name,
-            Type = "Custom",
-            ShortDescription = shortDescription,
-            DetailedDescription = detailedDescription,
-            AboutTheGame = aboutTheGame,
-            BoxArtUrlBase = "",
-            FallbackHeaderUrl = "",
-            ReleaseDate = releaseDate,
-            Developers = new() { developer },
-            Publishers = new() { publisher },
-            Genres = new() { genre },
-            ScreenshotUrls = new()
-        };
+                            continue;
+                        }
+                    }
+                }
 
+                // -------------------------------------
+                // Fallback to Steam CDN
+                // -------------------------------------
+                try
+                {
+                    ProgressChanged?.Invoke(
+                        current,
+                        total,
+                        $"Downloading cover for {appId}...");
 
-        string gameFolder =
-            Path.Combine(baseDir, customAppId.ToString());
+                    string url =
+                        $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/library_600x900.jpg";
 
-        Directory.CreateDirectory(gameFolder);
+                    byte[] image = await _client.GetByteArrayAsync(url);
 
-        await WriteMetaAsync(baseDir, meta);
-        await WriteMetaHelperAsync(baseDir, meta);
+                    await File.WriteAllBytesAsync(boxArt, image);
 
-        appIds.Add(customAppId);
+                    downloaded++;
 
-        await File.WriteAllTextAsync(
-            ownedGamesPath,
-            ownedData.ToJsonString());
+                    ProgressChanged?.Invoke(
+                        current,
+                        total,
+                        $"Downloaded cover for {appId}");
+                }
+                catch
+                {
+                    missing++;
 
-        MessageBox.Show(
-            $"Custom title created.\nAppID: {customAppId}",
-            "Success",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
-    }
-
-    internal async Task BasicFetch(string sourceFolder, string targetFolder)
-    {
-        if (!Directory.Exists(sourceFolder))
-        {
-            MessageBox.Show("Source folder does not exist.");
-            return;
-        }
-
-        Directory.CreateDirectory(targetFolder);
-
-        List<int> appIds = new();
-
-        foreach (string dir in Directory.GetDirectories(sourceFolder))
-        {
-            string folderName = Path.GetFileName(dir);
-
-            Directory.CreateDirectory(Path.Combine(targetFolder, folderName));
-
-            if (int.TryParse(folderName, out int appId))
-            {
-                appIds.Add(appId);
+                    ProgressChanged?.Invoke(
+                        current,
+                        total,
+                        $"No cover found for {appId}");
+                }
             }
+
+            ProgressChanged?.Invoke(
+                total,
+                total,
+                "Artwork update complete.");
+
+            MessageBox.Show(
+                $"Local Copies : {copied}\n" +
+                $"Downloaded   : {downloaded}\n" +
+                $"Skipped      : {skipped}\n" +
+                $"Missing      : {missing}",
+                "Artwork Update Complete",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
-        if (appIds.Count == 0)
+        public async Task DownloadScreenshotsAsync(string boxRoomCachePath)
         {
-            MessageBox.Show("No Steam AppID folders found.");
-            return;
-        }
-
-        await ScrapeGamesAsync(string.Join(Environment.NewLine, appIds), targetFolder);
-    }
-    public async Task ScrapeGamesAsync(string inputText, string targetFolder)
-    {
-        string[] lines = inputText.Split(
-            new[] { Environment.NewLine },
-            StringSplitOptions.RemoveEmptyEntries);
-
-        int total = lines.Length;
-        int current = 0;
-
-        int downloaded = 0;
-        int skipped = 0;
-        int failed = 0;
-
-        List<int> successfulIds = new();
-
-        foreach (string line in lines)
-        {
-            current++;
-
-            if (!int.TryParse(line.Trim(), out int appId))
+            if (!Directory.Exists(boxRoomCachePath))
             {
-                failed++;
+                MessageBox.Show("BOXROOM cache folder not found.");
+                return;
+            }
+
+            string[] gameFolders = Directory.GetDirectories(boxRoomCachePath);
+
+            int total = gameFolders.Length;
+            int current = 0;
+
+            int downloaded = 0;
+            int skipped = 0;
+            int failed = 0;
+
+            foreach (string gameFolder in gameFolders)
+            {
+                current++;
+
+                string metaPath = Path.Combine(gameFolder, "meta.json");
+
+                if (!File.Exists(metaPath))
+                {
+                    ProgressChanged?.Invoke(
+                        current,
+                        total,
+                        $"Skipping {Path.GetFileName(gameFolder)} (no metadata)");
+
+                    continue;
+                }
+
+                SteamMeta? meta = JsonSerializer.Deserialize<SteamMeta>(
+                    await File.ReadAllTextAsync(metaPath));
+
+                if (meta == null || meta.ScreenshotUrls.Count == 0)
+                {
+                    ProgressChanged?.Invoke(
+                        current,
+                        total,
+                        $"No screenshots for {Path.GetFileName(gameFolder)}");
+
+                    continue;
+                }
 
                 ProgressChanged?.Invoke(
                     current,
                     total,
-                    $"Invalid AppID: {line}");
+                    $"Downloading screenshots for {meta.Name}...");
 
-                continue;
-            }
+                List<Task> tasks = new();
 
-            string targetDir = Path.Combine(
-                targetFolder,
-                appId.ToString());
+                for (int i = 0; i < Math.Min(3, meta.ScreenshotUrls.Count); i++)
+                {
+                    int index = i;
+                    string url = meta.ScreenshotUrls[index];
+                    string output = Path.Combine(gameFolder, $"screen_{index}.jpg");
 
-            string metaPath = Path.Combine(
-                targetDir,
-                "meta.json");
+                    if (File.Exists(output))
+                    {
+                        skipped++;
+                        continue;
+                    }
 
-            // Already scraped
-            if (File.Exists(metaPath))
-            {
-                skipped++;
+                    tasks.Add(Task.Run(async () =>
+                    {
+                        try
+                        {
+                            byte[] image = await _client.GetByteArrayAsync(url);
+                            await File.WriteAllBytesAsync(output, image);
 
-                ProgressChanged?.Invoke(
-                    current,
-                    total,
-                    $"Skipping {appId} (already exists)");
+                            Interlocked.Increment(ref downloaded);
+                        }
+                        catch
+                        {
+                            Interlocked.Increment(ref failed);
+                        }
+                    }));
+                }
 
-                continue;
-            }
-
-            ProgressChanged?.Invoke(
-                current,
-                total,
-                $"Fetching {appId}...");
-
-            SteamMeta? meta = await GetSteamData(appId);
-
-            if (meta == null)
-            {
-                failed++;
+                await Task.WhenAll(tasks);
 
                 ProgressChanged?.Invoke(
                     current,
                     total,
-                    $"Failed {appId}");
-
-                continue;
+                    $"Finished {meta.Name}");
             }
-            await WriteMetaAsync(targetDir, meta);
-            await WriteMetaHelperAsync(targetDir, meta);
 
-            downloaded++;
-            successfulIds.Add(appId);
-
-            ProgressChanged?.Invoke(
-                current,
-                total,
-                $"Saved {meta.Name}");
-
-            // Be nice to Steam
-            await Task.Delay(Random.Shared.Next(200, 500));
-        }
-
-        if (successfulIds.Count > 0)
-        {
             ProgressChanged?.Invoke(
                 total,
                 total,
-                "Updating owned_games.json...");
+                "Screenshot download complete.");
 
-            await UpdateOwnedGamesAsync(
-                targetFolder,
-                successfulIds);
+            MessageBox.Show(
+                $"Downloaded : {downloaded}\n" +
+                $"Skipped    : {skipped}\n" +
+                $"Failed     : {failed}",
+                "Screenshot Download Complete",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
-
-        ProgressChanged?.Invoke(
-            total,
-            total,
-            $"Done! Downloaded: {downloaded}  Skipped: {skipped}  Failed: {failed}");
-    }
-
-
-    public async Task UpdateBoxArtAsync(
-    string steamCachePath,
-    string boxRoomCachePath)
-    {
-        if (!Directory.Exists(steamCachePath))
-        {
-            MessageBox.Show("Steam cache folder not found.");
-            return;
-        }
-
-        if (!Directory.Exists(boxRoomCachePath))
-        {
-            MessageBox.Show("BOXROOM cache folder not found.");
-            return;
-        }
-
-        int copied = 0;
-        int skipped = 0;
-        int missing = 0;
-
-        foreach (string gameFolder in Directory.GetDirectories(boxRoomCachePath))
-        {
-            string appId = Path.GetFileName(gameFolder);
-
-            string boxArt =
-                Path.Combine(gameFolder, "boxart.jpg");
-
-            // Already has artwork
-            if (File.Exists(boxArt))
-            {
-                skipped++;
-                continue;
-            }
-
-            string steamFolder =
-                Path.Combine(steamCachePath, appId);
-
-            if (!Directory.Exists(steamFolder))
-            {
-                missing++;
-                continue;
-            }
-
-            string? cover = Directory
-                .EnumerateFiles(
-                    steamFolder,
-                    "library_600x900.jpg",
-                    SearchOption.AllDirectories)
-                .FirstOrDefault();
-
-            if (cover == null)
-            {
-                missing++;
-                continue;
-            }
-
-            File.Copy(cover, boxArt);
-
-            copied++;
-        }
-
-        MessageBox.Show(
-            $"Copied : {copied}\n" +
-            $"Skipped: {skipped}\n" +
-            $"Missing: {missing}",
-            "Artwork Update Complete",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
     }
 }
